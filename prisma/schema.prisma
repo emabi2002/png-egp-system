@@ -1,0 +1,535 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  NPC_ADMIN
+  AGENCY_BUYER
+  SUPPLIER_USER
+  AUDITOR
+  PUBLIC
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AgencyType {
+  MINISTRY
+  AUTHORITY
+  SOE
+  PROVINCIAL
+  DISTRICT
+}
+
+enum IRCStatus {
+  VERIFIED
+  PENDING
+  FAILED
+  NOT_PROVIDED
+}
+
+enum KYCStatus {
+  VERIFIED
+  PENDING
+  FAILED
+}
+
+enum ProcurementPlanStatus {
+  DRAFT
+  SUBMITTED
+  NPC_APPROVED
+  REJECTED
+}
+
+enum Category {
+  GOODS
+  WORKS
+  SERVICES
+  CONSULTING
+}
+
+enum ProcurementMethod {
+  OPEN
+  RESTRICTED
+  REQUEST_FOR_QUOTATIONS
+  SINGLE_SOURCE
+  FRAMEWORK
+}
+
+enum TenderStatus {
+  DRAFT
+  NPC_REVIEW
+  PUBLISHED
+  CLOSED
+  UNDER_EVALUATION
+  AWARDED
+  CANCELLED
+}
+
+enum Currency {
+  PGK
+  USD
+  AUD
+  OTHER
+}
+
+enum BidStatus {
+  DRAFT
+  SUBMITTED
+  WITHDRAWN
+  DISQUALIFIED
+  RESPONSIVE
+}
+
+enum EvaluationPhase {
+  PRELIMINARY
+  TECHNICAL
+  FINANCIAL
+  POST_QUALIFICATION
+}
+
+enum EvaluationMethod {
+  LOWEST_EVALUATED
+  QUALITY_COST_BASED
+  QUALITY_BASED
+  FIXED_BUDGET
+  LEAST_COST
+}
+
+enum AwardStatus {
+  PENDING_NPC_APPROVAL
+  PUBLISHED
+  RESCINDED
+}
+
+enum ContractStatus {
+  ACTIVE
+  SUSPENDED
+  COMPLETED
+  TERMINATED
+}
+
+enum MilestoneStatus {
+  PLANNED
+  IN_PROGRESS
+  VERIFIED
+  PAID
+  OVERDUE
+}
+
+enum PaymentStatus {
+  REQUESTED
+  CLEARED
+  REJECTED
+}
+
+enum BlacklistStatus {
+  ACTIVE
+  EXPIRED
+}
+
+// ============================================================================
+// CORE MODELS
+// ============================================================================
+
+model Agency {
+  id            String      @id @default(uuid())
+  name          String      @unique
+  code          String      @unique
+  type          AgencyType
+  address       String?
+  contactEmail  String?
+  contactPhone  String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relationships
+  users             User[]
+  procurementPlans  ProcurementPlan[]
+  tenders          Tender[]
+
+  @@map("agencies")
+}
+
+model User {
+  id              String      @id @default(uuid())
+  email           String      @unique
+  emailVerified   DateTime?
+  passwordHash    String?
+  fullName        String
+  role            UserRole
+  agencyId        String?
+  phone           String?
+  twoFactorEnabled Boolean    @default(false)
+  status          UserStatus  @default(ACTIVE)
+  lastLoginAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relationships
+  agency                Agency?           @relation(fields: [agencyId], references: [id])
+  ownedSupplier        Supplier?         @relation("SupplierOwner")
+  bidOpenings          BidOpening[]
+  evaluationPanels     Evaluation[]      @relation("EvaluationPanel")
+  verifiedMilestones   Milestone[]       @relation("MilestoneVerifier")
+  blacklistDecisions   BlacklistEntry[]  @relation("BlacklistDecider")
+  auditLogs            AuditLog[]
+  contractsManaged     Contract[]        @relation("ContractManager")
+  accounts             Account[]
+  sessions             Session[]
+
+  @@map("users")
+}
+
+model Supplier {
+  id              String      @id @default(uuid())
+  legalName       String
+  tradingName     String?
+  country         String      @default("PNG")
+  tin             String?
+  ipaRegNo        String?
+  ircStatus       IRCStatus   @default(NOT_PROVIDED)
+  contactEmail    String
+  contactPhone    String?
+  address         String?
+  categories      String? // JSON string of array for SQLite compatibility
+  blacklistFlag   Boolean     @default(false)
+  ratingAvg       Float?
+  ratingCount     Int         @default(0)
+  kycStatus       KYCStatus   @default(PENDING)
+  complianceDocs  Json?
+  isActive        Boolean     @default(true)
+  ownerUserId     String      @unique
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relationships
+  owner           User              @relation("SupplierOwner", fields: [ownerUserId], references: [id])
+  bids            Bid[]
+  awards          Award[]
+  contracts       Contract[]
+  blacklistEntries BlacklistEntry[]
+
+  @@unique([legalName, tin])
+  @@map("suppliers")
+}
+
+model ProcurementPlan {
+  id           String                  @id @default(uuid())
+  agencyId     String
+  fiscalYear   Int
+  title        String
+  status       ProcurementPlanStatus   @default(DRAFT)
+  totalBudget  Decimal
+  documentUrl  String?
+  submittedAt  DateTime?
+  approvedAt   DateTime?
+  remarks      String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  // Relationships
+  agency       Agency                  @relation(fields: [agencyId], references: [id])
+
+  @@map("procurement_plans")
+}
+
+model Tender {
+  id                     String             @id @default(uuid())
+  agencyId               String
+  refNo                  String             @unique
+  title                  String
+  description            String
+  category               Category
+  estimatedValue         Decimal
+  procurementMethod      ProcurementMethod
+  publicationDate        DateTime?
+  bidSubmissionDeadline  DateTime
+  bidOpeningDatetime     DateTime
+  status                 TenderStatus       @default(DRAFT)
+  documents              Json?
+  eligibilityCriteria    String?
+  evaluationCriteria     Json?
+  siteVisitRequired      Boolean            @default(false)
+  siteVisitDatetime      DateTime?
+  prebidMeetingDatetime  DateTime?
+  questionsDeadline      DateTime?
+  clarifications         Json?
+  currency               Currency           @default(PGK)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  // Relationships
+  agency                 Agency             @relation(fields: [agencyId], references: [id])
+  bids                   Bid[]
+  bidOpenings            BidOpening[]
+  evaluations            Evaluation[]
+  awards                 Award[]
+  contracts              Contract[]
+
+  @@index([status])
+  @@index([bidSubmissionDeadline])
+  @@map("tenders")
+}
+
+model Bid {
+  id                 String      @id @default(uuid())
+  tenderId           String
+  supplierId         String
+  submittedAt        DateTime?
+  status             BidStatus   @default(DRAFT)
+  bidAmount          Decimal
+  bidCurrency        Currency    @default(PGK)
+  bidBondValue       Decimal?
+  bidBondDocUrl      String?
+  technicalDocs      Json?
+  financialDocs      Json?
+  encryptedPayloadUrl String?
+  hashSignature      String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  // Relationships
+  tender             Tender      @relation(fields: [tenderId], references: [id])
+  supplier           Supplier    @relation(fields: [supplierId], references: [id])
+  evaluationScores   EvaluationScore[]
+
+  @@unique([tenderId, supplierId, status])
+  @@map("bids")
+}
+
+model BidOpening {
+  id             String    @id @default(uuid())
+  tenderId       String
+  openedAt       DateTime
+  openedBy       String
+  minuteUrl      String?
+  attendanceList Json?
+  createdAt      DateTime  @default(now())
+
+  // Relationships
+  tender         Tender    @relation(fields: [tenderId], references: [id])
+  opener         User      @relation(fields: [openedBy], references: [id])
+
+  @@map("bid_openings")
+}
+
+model Evaluation {
+  id              String            @id @default(uuid())
+  tenderId        String
+  phase           EvaluationPhase
+  panel           String?           // JSON string of user IDs for SQLite compatibility
+  method          EvaluationMethod
+  startedAt       DateTime?
+  completedAt     DateTime?
+  outcomeSummary  String?
+  recommendationSupplierId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relationships
+  tender          Tender            @relation(fields: [tenderId], references: [id])
+  panelMembers    User[]            @relation("EvaluationPanel")
+  scores          EvaluationScore[]
+
+  @@map("evaluations")
+}
+
+model EvaluationScore {
+  id            String      @id @default(uuid())
+  evaluationId  String
+  bidId         String
+  criterion     String
+  weight        Decimal
+  score         Decimal
+  weightedScore Decimal
+  notes         String?
+  createdAt     DateTime    @default(now())
+
+  // Relationships
+  evaluation    Evaluation  @relation(fields: [evaluationId], references: [id])
+  bid           Bid         @relation(fields: [bidId], references: [id])
+
+  @@map("evaluation_scores")
+}
+
+model Award {
+  id            String      @id @default(uuid())
+  tenderId      String
+  supplierId    String
+  awardValue    Decimal
+  awardCurrency Currency    @default(PGK)
+  awardDate     DateTime
+  noticeUrl     String?
+  approvalChain Json?
+  status        AwardStatus @default(PENDING_NPC_APPROVAL)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relationships
+  tender        Tender      @relation(fields: [tenderId], references: [id])
+  supplier      Supplier    @relation(fields: [supplierId], references: [id])
+
+  @@map("awards")
+}
+
+model Contract {
+  id                    String          @id @default(uuid())
+  tenderId              String
+  supplierId            String
+  contractRef           String          @unique
+  signedDate            DateTime
+  startDate             DateTime
+  endDate               DateTime
+  contractValue         Decimal
+  currency              Currency        @default(PGK)
+  performanceSecurityUrl String?
+  status                ContractStatus  @default(ACTIVE)
+  contractDocUrl        String?
+  managerUserId         String
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relationships
+  tender                Tender          @relation(fields: [tenderId], references: [id])
+  supplier              Supplier        @relation(fields: [supplierId], references: [id])
+  manager               User            @relation("ContractManager", fields: [managerUserId], references: [id])
+  milestones            Milestone[]
+  payments              Payment[]
+
+  @@map("contracts")
+}
+
+model Milestone {
+  id                String          @id @default(uuid())
+  contractId        String
+  name              String
+  description       String?
+  dueDate           DateTime
+  value             Decimal
+  status            MilestoneStatus @default(PLANNED)
+  verificationDocUrl String?
+  verifiedBy        String?
+  verifiedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // Relationships
+  contract          Contract        @relation(fields: [contractId], references: [id])
+  verifier          User?           @relation("MilestoneVerifier", fields: [verifiedBy], references: [id])
+  payments          Payment[]
+
+  @@map("milestones")
+}
+
+model Payment {
+  id                   String        @id @default(uuid())
+  contractId           String
+  milestoneId          String?
+  amount               Decimal
+  currency             Currency      @default(PGK)
+  paymentRequestDate   DateTime
+  paymentStatus        PaymentStatus @default(REQUESTED)
+  ifmsVoucherNo        String?
+  documents            Json?
+  paidAt               DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  // Relationships
+  contract             Contract      @relation(fields: [contractId], references: [id])
+  milestone            Milestone?    @relation(fields: [milestoneId], references: [id])
+
+  @@map("payments")
+}
+
+model BlacklistEntry {
+  id          String          @id @default(uuid())
+  supplierId  String
+  reason      String
+  startDate   DateTime
+  endDate     DateTime?
+  status      BlacklistStatus @default(ACTIVE)
+  evidenceUrl String?
+  decidedBy   String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relationships
+  supplier    Supplier        @relation(fields: [supplierId], references: [id])
+  decider     User            @relation("BlacklistDecider", fields: [decidedBy], references: [id])
+
+  @@map("blacklist_entries")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorUserId String
+  action     String
+  entity     String
+  entityId   String
+  payload    Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  // Relationships
+  actor      User     @relation(fields: [actorUserId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// NextAuth.js models
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
