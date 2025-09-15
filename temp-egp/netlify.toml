@@ -1,0 +1,16 @@
+[build]
+  command = "DISABLE_ESLINT_PLUGIN=true npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "18"
+  DISABLE_ESLINT_PLUGIN = "true"
+  ESLINT_NO_DEV_ERRORS = "true"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[functions]
+  node_bundler = "esbuild"
